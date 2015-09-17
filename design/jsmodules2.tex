@@ -1,0 +1,379 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[latin1]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{xspace}
+\usepackage{alltt}
+\usepackage{color}
+
+
+% Calculus
+
+\newcommand\x[1]{\ensuremath{\mathit{#1}}\xspace}
+\newcommand\f[1]{\ensuremath{\mathop{\mathrm{#1\null}}\nolimits}\xspace}
+\newcommand\ff[1]{\ensuremath{\mathbin{\mathrm{#1\null}}}\xspace}
+\newcommand\y[1]{\ensuremath{\mathsf{#1}}\xspace}
+\newcommand\yy[1]{\ensuremath{{}\hspace{-0.25em}\mathrel{\mathsf{#1\null}}}\xspace}
+\newcommand\yyy[1]{\ensuremath{\mathrel{\mathsf{#1\null}}}\xspace}
+
+\newcommand\dom{\ff{dom}}
+\newcommand\ran{\ff{ran}}
+\newcommand\fv{\ff{fv}}
+
+\renewcommand\vec[1]{\overline{#1}}
+
+
+% Code
+
+\newcommand\K[1]{\ensuremath{\textsf{#1}}}
+\newcommand\KK[1]{\ensuremath{\K{\textbf{#1}}}}
+
+\newcommand\Kback{\ensuremath{\backslash\!}}
+\newcommand\Kto{\ensuremath{\rightarrow}\xspace}
+\newcommand\Ktoo{\ensuremath{\Rightarrow}\xspace}
+\newcommand\Kfrom{\ensuremath{\leftarrow}\xspace}
+\newcommand\Kfroom{\ensuremath{\Leftarrow}\xspace}
+\newcommand\Ktimes{\ensuremath{\times}\xspace}
+\newcommand\Kneq{\ensuremath{\neq}\xspace}
+\newcommand\Kleq{\ensuremath{\leq}\xspace}
+\newcommand\Klt{\ensuremath{<}\xspace}
+\newcommand\Kgt{\ensuremath{>}\xspace}
+\newcommand\Kseal{\ensuremath{:>}\xspace}
+\newcommand\Kdot{\ensuremath{\cdot}\xspace}
+\newcommand\Kcirc{\ensuremath{\circ}\xspace}
+\newcommand\Ksb[1]{\ensuremath{_{#1}}}
+
+\newenvironment{code}{%
+  \begin{alltt}%
+  \small\sffamily
+}{
+  \end{alltt}%
+}
+
+
+% Highlighting
+
+\definecolor{hilite}{rgb}{0.9,0,0}
+\newcommand{\hilite}[1]{\color{hilite}#1\color{black}}
+
+\newcommand\note[1]{\noindent #1}
+
+
+% Main
+
+\title{EcmaScript 6 Module Semantics, Take 2}
+\author{Andreas Rossberg}
+
+
+\begin{document}
+
+%\maketitle
+
+\begin{center}
+\section*{\textsf{EcmaScript 6 Module Semantics, Take 2}}
+\subsubsection*{Andreas Rossberg [\today]}
+\end{center}
+
+
+\section{Source Language}
+
+\subsection*{Syntax}
+
+$$
+\begin{array}{@{}rcl@{}}
+e &::=& x ~|~ e\K.x ~|~ n ~|~ e\K+e ~|~ \dots \\
+m &::=& x ~|~ m\K.x ~|~ \{d\} \\
+d &::=& \K{let}~x\K=e ~|~ \K{module}~x\K=m ~|~ \\&& \K{export}~x ~|~ \K{export}~{\star} ~|~ \K{import}~m\K.x ~|~ \K{import}~m\K.{\star}
+  ~|~ \epsilon ~|~ d\K;d \\
+\end{array}
+$$
+
+\note{
+Notes:
+\begin{itemize}
+\item A program is treated as a module $\{d\}$.
+\item The syntax for projection is slightly generalized by allowing arbitrary $m$.
+%\item Value declarations are expressed abstractly as ``\K{module}~x\K=\K{v}''.
+%\item Other module syntax can be seen as sugar for the above.
+\end{itemize}
+}
+
+
+
+\section{Algorithmic Type-Checking}
+
+\subsection*{Types and Environments}
+$$
+\begin{array}{lrcl}
+\mbox{Signatures} & \sigma &::=& \alpha ~|~ \y{V} ~|~ \{\rho\} \\
+\mbox{Rows} & \gamma &::=& \rho ~|~ x{:}\sigma ~|~ {\cdot} ~|~ \gamma,\gamma ~|~ \gamma^\star \\
+\mbox{Environments} & \Gamma &::=& {\cdot} ~|~ \Gamma;\gamma \\
+[1ex]
+\mbox{Constraints} & C &::=& \bot ~|~ C,C ~|~ \alpha{:=}\hat\sigma ~|~ \rho{:=}\hat\gamma \\
+\mbox{Constraint Signatures} & \hat\sigma &::=& \cdots ~|~ \bot ~|~ \hat\Gamma(x) ~|~ \sigma.x \\
+\mbox{Constraint Rows} & \hat\gamma &::=& \cdots ~|~ \bot ~|~ \hat\gamma|_X ~|~ \sigma.{\star} \\
+\mbox{Constraint Environments} & \hat\Gamma &::=& \cdot ~|~ \hat\Gamma;\hat\gamma \\
+\end{array}
+$$
+
+\subsection*{Implicit Equivalences}
+$$
+\begin{array}{ll}
+\begin{array}{rcl}
+\gamma,\cdot &=& \gamma \\
+\gamma_1,\gamma_2 &=& \gamma_2,\gamma_1 \\
+(\gamma_1,\gamma_2),\gamma_3 &=& \gamma_1,(\gamma_2,\gamma_3) \\
+(\gamma_1,\gamma_2)^\star &=& \gamma_1^\star,\gamma_2^\star \\
+(\gamma^\star)^\star &=& \gamma^\star \\
+\end{array}
+&
+\begin{array}{rcl}
+%C,\top &=& C \\
+C,\bot &=& \bot \\
+C_1,C_2 &=& C_2,C_1 \\
+(C_1,C_2),C_3 &=& C_1,(C_2,C_3) \\
+~\\
+~%\hat\gamma_1{\sqcup}\hat\gamma_2 &=& \hat\gamma_2{\sqcup}\hat\gamma_1 \\
+%(\hat\gamma_1,\hat\gamma_2){\sqcup}\hat\gamma_3 &=& \hat\gamma_1,(\hat\gamma_2{\sqcup}\hat\gamma_3) \\
+\end{array}
+\end{array}
+$$
+
+\note{
+Notes:
+\begin{itemize}
+\item We generalize R\'emy's style rows by allowing arbitrary concatenation $\gamma_1,\gamma_2$.
+\item $\gamma^\star$ marks bindings that are defined via $\K{import}~m\K.{\star}$, for which overlaps are allowed and only raise an error if used. The rules give unstarred bindings precedence over starred ones.
+\item Environments separate scopes by ``$;$'', which is relevant for distinguishing between shadowing and overlapping.
+\item Instead of using unification, we build a set of more special-cased constraints that have to be solved in a separate phase.
+\item We omit the hat from $\hat\sigma$, $\hat\gamma$, $\hat\Gamma$ in the rules.
+\end{itemize}
+}
+
+
+\subsection*{Typing Rules}
+
+\subsubsection*{\fbox{$\Gamma \vdash e : \sigma ~|~ C$}}
+
+$$
+\frac{
+  \alpha~\mathrm{fresh}
+}{
+  \Gamma \vdash x : \alpha ~|~ \alpha{:=}\Gamma(x)
+}
+\qquad
+\frac{
+  \Gamma \vdash e : \sigma ~|~ C
+  \qquad
+  \alpha~\mathrm{fresh}
+}{
+  \Gamma \vdash e\K.x : \alpha ~|~ C, \alpha{:=}\sigma.x
+}
+$$
+
+$$
+\frac{
+}{
+  \Gamma \vdash n : \y{V} ~|~ \top
+}
+\qquad
+\frac{
+  \Gamma \vdash e_1 : \sigma_1 ~|~ C_1
+  \qquad
+  \Gamma \vdash e_2 : \sigma_2 ~|~ C_2
+}{
+  \Gamma \vdash e_1\K+e_2 : \y{V} ~|~ C_1, C_2
+}
+$$
+
+\note{
+\begin{itemize}
+\item The argument types of addition are not constrained, errors are dynamic.
+\end{itemize}
+}
+
+\subsubsection*{\fbox{$\Gamma \vdash m : \sigma ~|~ C$}}
+
+$$
+\frac{
+  \alpha,\rho~\mathrm{fresh}
+}{
+  \Gamma \vdash x : \alpha ~|~ \alpha{:=}\Gamma(x), \rho{:=}\alpha.{\star}
+}
+\qquad
+\frac{
+  \Gamma \vdash m : \sigma ~|~ C
+  \qquad
+  \alpha,\rho~\mathrm{fresh}
+}{
+  \Gamma \vdash m\K.x : \alpha ~|~ C, \alpha{:=}\sigma.x, \rho{:=}\sigma.{\star}
+}
+$$
+
+$$
+\frac{
+  \Gamma; \rho \vdash d : \gamma ~|~ C
+  \qquad
+  \rho,\rho'~\mathrm{fresh}
+}{
+  \Gamma \vdash \{d\} : \{\rho'\} ~|~ C, \rho{:=}\gamma, \rho'{:=}\gamma|_{\ff{exports}(d)}
+}
+$$
+
+\note{
+\begin{itemize}
+\item Modules are recursive, $\rho$ captures the local definitions.
+\item The constraints $\rho{:=}\sigma.{\star}$ in the first two rules ensure that $\sigma$ is a module type (unlike $\alpha{:=}\sigma.x$, which allows $\sigma=\y{V}$, for expression-level projection).
+\item The meta-function $\ff{exports}(d)$ gives the set of \KK{export}-ed identifiers in $d$, and restricts the domain of $\gamma$ to that set.
+We assume that \KK{export}~$\star$ yields the infinite set of all identifiers (written $\star$).
+\end{itemize}
+}
+
+
+\subsubsection*{\fbox{$\Gamma \vdash d : \gamma ~|~ C$}}
+
+$$
+\frac{
+  \Gamma \vdash e : \sigma ~|~ C
+}{
+  \Gamma \vdash \K{let}~x\K=e : x{:}\y{V} ~|~ C
+}
+\qquad
+\frac{
+  \Gamma \vdash m : \sigma ~|~ C
+  \qquad
+  \alpha~\mathrm{fresh}
+}{
+  \Gamma \vdash \K{module}~x\K=m : x{:}\alpha ~|~ C, \alpha{:=}\sigma
+}
+$$
+
+$$
+\frac{
+}{
+  \Gamma \vdash \K{export}~x : {\cdot} ~|~ \top
+}
+\qquad
+\frac{
+}{
+  \Gamma \vdash \K{export}~{\star} : {\cdot} ~|~ \top
+}
+$$
+
+$$
+\frac{
+  \Gamma \vdash m : \sigma ~|~ C
+  \qquad
+  \alpha,\rho~\mathrm{fresh}
+}{
+  \Gamma \vdash \K{import}~m\K.x : x{:}\alpha ~|~ C, \alpha{:=}\sigma.x, \rho{:=}\sigma.{\star}
+}
+\qquad
+\frac{
+  \Gamma \vdash m : \sigma ~|~ C
+  \qquad
+  \rho~\mathrm{fresh}
+}{
+  \Gamma \vdash \K{import}~m\K.{\star} : \rho^\star ~|~ C, \rho{:=}\sigma.{\star}
+}
+$$
+
+$$
+\frac{
+}{
+  \Gamma \vdash \epsilon : {\cdot} ~|~ \top
+}
+\qquad
+\frac{
+  \Gamma \vdash d_1 : \gamma_1 ~|~ C_1
+  \qquad
+  \Gamma \vdash d_2 : \gamma_2 ~|~ C_2
+  \qquad
+  \rho~\mathrm{fresh}
+}{
+  \Gamma \vdash d_1\K;d_2 : \rho ~|~ C_1, C_2, \rho{:=}\gamma_1,\gamma_2
+}
+$$
+
+\note{
+\begin{itemize}
+\item All module identifiers are given a fresh type variable as their immediate type. This allows detecting cycles when solving the constraints.
+\item Star annotations are sticky across export boundaries. Consider:
+$$
+\begin{array}{@{}l@{}}
+A_1=\{\K{export}~x\}; A_2=\{\K{export}~x\};
+AA=\{\K{import}~A_1.{\star}; \K{import}~A_2.{\star}; \K{export}~x\}; \\
+\K{let}~y=AA.x \mathrm{~~//~error!} \\
+B=\{\K{import}~AA.x; \K{let}~y=x\} \mathrm{~~//~error!} \\
+C=\{\K{import}~AA.x; \K{import}~A_1.x; \K{let}~y=x\} \mathrm{~~//~ok} \\
+\end{array}
+$$
+\end{itemize}
+}
+
+
+\subsection*{Constraint Resolution}
+
+$$
+\begin{array}{lcll}
+(\Gamma;\gamma)(x) &\Rightarrow& (\Gamma;\gamma')(x) & (\gamma \Rightarrow \gamma') \\
+(\Gamma;\gamma,x{:}\sigma)(x) &\Rightarrow& \sigma \\
+(\Gamma;x{:}\sigma^\star)(x) &\Rightarrow& \sigma \\
+(\Gamma;\gamma,x{:}\sigma_1^\star,x{:}\sigma_2^\star)(x) &\Rightarrow& \bot \\
+(\Gamma;\gamma,y{:}\sigma)(x) &\Rightarrow& (\Gamma;\gamma)(x) \\
+(\Gamma;\gamma,y{:}\sigma^\star)(x) &\Rightarrow& (\Gamma;\gamma)(x) \\
+(\Gamma;\cdot)(x) &\Rightarrow& \Gamma(x) \\
+(\cdot)(x) &\Rightarrow& \bot \\
+[1ex]
+\{\rho\}.x &\Rightarrow& (\cdot;\rho)(x) \\
+\y{V}.x &\Rightarrow& \y{V} \\
+[1ex]
+\{\rho\}.{\star} &\Rightarrow& \rho \\
+\y{V}.{\star} &\Rightarrow& \bot \\
+[1ex]
+\gamma|_\star &\Rightarrow& \gamma \\
+\gamma|_\emptyset &\Rightarrow& \cdot \\
+(x{:}\sigma,\gamma)|_X &\Rightarrow& x{:}\sigma,(\gamma|_{X-x}) & (x \in X) \\
+(x{:}\sigma^\star,\gamma^\star)|_X &\Rightarrow& x{:}\sigma^\star,(\gamma^\star|_X) & (x \in X) \\
+(x{:}\sigma,\gamma)|_X &\Rightarrow& \gamma|_X & (x \notin X) \\
+(x{:}\sigma^\star,\gamma)|_X &\Rightarrow& \gamma|_X & (x \notin X) \\
+%\cdot|_X &\Rightarrow& \bot & (X \neq \emptyset) \\
+[1ex]
+%\cdot{\sqcup}\gamma &\Rightarrow& \gamma \\
+%(x{:}\sigma_1,\gamma_1){\sqcup}(x{:}\sigma_2,\gamma_2) &\Rightarrow& \bot \\
+%(x{:}\sigma_1^\star,\gamma_1){\sqcup}(x{:}\sigma_2,\gamma_2) &\Rightarrow& \gamma_1{\sqcup}(x{:}\sigma_2,\gamma_2) \\
+%(x{:}\sigma,\gamma){\sqcup}(\overline{x'{:}\sigma'},\overline{x''{:}\sigma''^\star}) &\Rightarrow& \gamma{\sqcup}(x{:}\sigma,\overline{x'{:}\sigma'},\overline{x''{:}\sigma''^\star}) & (x \notin \{\overline{x'}, \overline{x''}\}) \\
+%(x{:}\sigma^\star,\gamma){\sqcup}(\overline{x'{:}\sigma'},\overline{x''{:}\sigma''^\star}) &\Rightarrow& \gamma{\sqcup}(x{:}\sigma^\star,\overline{x'{:}\sigma'},\overline{x''{:}\sigma''^\star}) & (x \notin \{\overline{x'}\}) \\
+x{:}\sigma_1,x{:}\sigma_2 &\Rightarrow& \bot \\
+x{:}\sigma_1,x{:}\sigma_2^\star &\Rightarrow& x{:}\sigma_1 \\
+\gamma_1,\gamma_2 &\Rightarrow& \gamma'_1,\gamma_2 & (\gamma_1 \Rightarrow \gamma'_1) \\
+[1ex]
+\alpha{:=}\sigma &\Rightarrow& \alpha{:=}\sigma' & (\sigma \Rightarrow \sigma') \\
+\alpha{:=}\alpha &\Rightarrow& \bot \\
+\alpha{:=}\bot &\Rightarrow& \bot \\
+\rho{:=}\gamma &\Rightarrow& \rho{:=}\gamma' & (\gamma \Rightarrow \gamma') \\
+\rho{:=}(\rho,\gamma) &\Rightarrow& \bot \\
+\rho{:=}\bot &\Rightarrow& \bot \\
+[1ex]
+C,\alpha{:=}\sigma &\Rightarrow& C[\sigma/\alpha],\alpha{:=}\sigma & (\sigma \neq \alpha) \\
+C,\rho{:=}\gamma &\Rightarrow& C[\gamma/\rho],\rho{:=}\gamma & (\gamma \neq \rho) \\
+\end{array}
+$$
+
+\note{
+\begin{itemize}
+\item It is an error to use an ambiguous starred identifier (4th rule for $\Gamma(x)$).
+\item Ambiguous unstarred identifiers are always an error (1st rule for $\gamma_1,\gamma_2$).
+\item Also, unstarred (i.e.\ explicitly bound) identifiers hide starred ones (2nd rule for $\gamma_1,\gamma_2$).
+\item We allow $\sigma.x$ with $\sigma=\y{V}$, in order to handle the $e\K.x$ case.
+\item Resolution terminates when $\bot$ arises, or when all constraints are in basic form, i.e.\ the r.h.s.\ is a proper $\sigma$/$\gamma$ that is well-formed and not a variable.
+\item No step introduces new constraints. %If we restrict use of the last two rules properly then
+It might be possible to define a suitable weight function on types and constraints for proving non-divergence.
+\item It is non-obvious that we cannot get stuck...
+\item All this looks somewhat too ad-hoc and operational for my taste. How can we give a declarative semantics to this mess?
+\end{itemize}
+}
+
+\end{document}

@@ -1,0 +1,1178 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[latin1]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{xspace}
+\usepackage{alltt}
+\usepackage{color}
+
+
+% Calculus
+
+\newcommand\x[1]{\ensuremath{\mathit{#1}}\xspace}
+\newcommand\f[1]{\ensuremath{\mathop{\mathrm{#1\null}}\nolimits}\xspace}
+\newcommand\ff[1]{\ensuremath{\mathbin{\mathrm{#1\null}}}\xspace}
+\newcommand\y[1]{\ensuremath{\mathsf{#1}}\xspace}
+\newcommand\yy[1]{\ensuremath{{}\hspace{-0.25em}\mathrel{\mathsf{#1\null}}}\xspace}
+\newcommand\yyy[1]{\ensuremath{\mathrel{\mathsf{#1\null}}}\xspace}
+
+\newcommand\dom{\ff{dom}}
+\newcommand\ran{\ff{ran}}
+\newcommand\fv{\ff{fv}}
+
+\renewcommand\vec[1]{\overline{#1}}
+
+
+% Code
+
+\newcommand\K[1]{\ensuremath{\textsf{#1}}}
+\newcommand\KK[1]{\ensuremath{\K{\textbf{#1}}}}
+
+\newcommand\Kback{\ensuremath{\backslash\!}}
+\newcommand\Kto{\ensuremath{\rightarrow}\xspace}
+\newcommand\Ktoo{\ensuremath{\Rightarrow}\xspace}
+\newcommand\Kfrom{\ensuremath{\leftarrow}\xspace}
+\newcommand\Kfroom{\ensuremath{\Leftarrow}\xspace}
+\newcommand\Ktimes{\ensuremath{\times}\xspace}
+\newcommand\Kneq{\ensuremath{\neq}\xspace}
+\newcommand\Kleq{\ensuremath{\leq}\xspace}
+\newcommand\Klt{\ensuremath{<}\xspace}
+\newcommand\Kgt{\ensuremath{>}\xspace}
+\newcommand\Kseal{\ensuremath{:>}\xspace}
+\newcommand\Kdot{\ensuremath{\cdot}\xspace}
+\newcommand\Kcirc{\ensuremath{\circ}\xspace}
+\newcommand\Ksb[1]{\ensuremath{_{#1}}}
+
+\newenvironment{code}{%
+  \begin{alltt}%
+  \small\sffamily
+}{
+  \end{alltt}%
+}
+
+
+% Highlighting
+
+\definecolor{hilite}{rgb}{0.9,0,0}
+\newcommand{\hilite}[1]{\color{hilite}#1\color{black}}
+
+\newcommand\note[1]{\noindent #1}
+
+
+% Main
+
+\title{EcmaScript 6 Module Semantics}
+\author{Andreas Rossberg}
+
+
+\begin{document}
+
+%\maketitle
+
+\begin{center}
+\section*{\textsf{EcmaScript 6 Module Semantics}}
+\subsubsection*{Andreas Rossberg [\today]}
+\end{center}
+
+
+\section{Source Language}
+
+\subsection*{Syntax}
+
+$$
+\begin{array}{rcl}
+e &::=& \dots \\ % ~|~ x ~|~ m\K.x \\
+m &::=& x ~|~ m\K.x ~|~ \{d\} ~|~ \K{from}~\x{url} \\
+d &::=& \K{let}~x\K=e ~|~ \K{module}~x\K=m ~|~ \K{export}~x ~|~ \K{import}~m\K.x ~|~ \K{import}~m\K.{\star}
+  ~|~ \epsilon ~|~ d\K;d \\
+\end{array}
+$$
+
+\note{
+Notes:
+\begin{itemize}
+\item A program is treated as a module $\{d\}$.
+\item The syntax for projection is slightly generalized in allowing arbitrary $m$.
+\item Other module syntax can be seen as sugar for the above.
+\end{itemize}
+}
+
+
+\section{Types and Environments}
+
+\subsection*{Syntax}
+
+\newcommand\UU{\y{U}}
+\newcommand\DD{\y{D}}
+\newcommand\LL{\y{L}}
+\newcommand\RR{\y{R}}
+%\newcommand\UU{\otimes}
+%\newcommand\DD{\odot}
+%\newcommand\LL{\oplus}
+%\newcommand\RR{\ominus}
+%\newcommand\tydef[1]{\stackrel{_{#1}}=}
+
+$$
+\begin{array}{lrcl}
+\mbox{Signatures} & \Sigma &::=& \y{V} ~|~ \{\Gamma\} ~|~ \alpha \\
+\mbox{Term Environments} & \Gamma &::=& {\cdot} ~|~ \Gamma,x{:}\Sigma \\
+\mbox{Type Environments} & \Delta &::=& {\cdot} ~|~ \Delta,\alpha{=}\Sigma^\pi \\
+\mbox{Positions} & \pi &::=& \LL ~|~ \RR ~|~ \UU ~|~ \DD \\
+\end{array}
+$$
+
+\note{
+Notes:
+\begin{itemize}
+\item $\y{V}$ describes \K{let}-bound values, $\{\Gamma\}$ modules.
+\item Type variables and type environments are utilised to represent recursive types ($\mu$-types would be much more difficult to handle, I tried...).
+\item Positions describe the relative order of respective module bindings and their scopes, relative to the one `currently' looked at by a rule:
+  \begin{itemize}
+  \item $\LL$ are types of modules \emph{left} (earlier) in the same scope.
+  \item $\RR$ are types of modules \emph{right} (later) in the same or an outer scope.
+  \item $\UU$ are types of modules \emph{upward} (enclosing) or their earlier children.
+  \item $\DD$ are types of modules \emph{downward} (enclosed).
+  \end{itemize}
+We use these to abstractly simulate the algorithmic traversal order in the declarative rules.
+\end{itemize}
+}
+
+
+\subsection*{Auxiliary Definitions}
+
+$$
+\begin{array}{rcll}
+(\Delta, \alpha{=}\Sigma^\pi)^{\pi'/\pi} &=& \Delta^{\pi'/\pi}, \alpha{=}\Sigma^{\pi'} \\
+(\Delta, \alpha{=}\Sigma^{\pi''})^{\pi'/\pi} &=& \Delta^{\pi'/\pi}, \alpha{=}\Sigma^{\pi''} &\mbox{if $\pi'' \neq \pi$} \\
+\cdot^{\pi'/\pi} &=& \cdot \\
+[0.9ex]
+\Delta^\pi &=& (((\Delta^{\pi/\UU})^{\pi/\DD})^{\pi/\LL})^{\pi/\RR} \\
+\end{array}
+$$
+
+$\Delta^+$ is defined as smallest fixpoint of the following equations:
+$$
+\begin{array}{rcll}
+\Delta^+(\alpha) &=& \{\alpha'\} \cup \Delta^+(\alpha') &\mbox{if $\Delta(\alpha) = \alpha'$} \\
+\Delta^+(\alpha) &=& \{\} &\mbox{otherwise} \\
+\end{array}
+$$
+
+\note{
+Note: The condition $\alpha \in \Delta^+(\alpha)$ thereby describes an illegal type cycle.
+}
+
+
+\subsection*{Well-formedness}
+
+\subsubsection*{\fbox{$\vdash \Delta$} \fbox{$\Delta \vdash \Delta$}}
+
+$$
+\frac{
+  \Delta \vdash \Delta
+}{
+  \vdash \Delta
+}
+\qquad
+\frac{
+}{
+  \Delta \vdash {\cdot}
+}
+\qquad
+\frac{
+  \Delta \vdash \Delta'
+  \qquad
+  \Delta \vdash \Sigma
+  \qquad
+  \alpha \notin \Delta^+(\alpha)
+}{
+  \Delta \vdash \Delta', \alpha{=}\Sigma^\pi
+}
+$$
+
+\note{
+Note: Type environments may not contain any direct cycles.
+}
+
+
+\subsubsection*{\fbox{$\Delta \vdash \Gamma$}}
+
+$$
+\frac{
+}{
+  \Delta \vdash {\cdot}
+}
+\qquad
+\frac{
+  \Delta \vdash \Gamma
+  \qquad
+  \Delta \vdash \Sigma
+}{
+  \Delta \vdash \Gamma, x{:}\Sigma
+}
+$$
+
+\subsubsection*{\fbox{$\Delta \vdash \Sigma$}}
+
+$$
+\frac{
+}{
+  \Delta \vdash \y{V}
+}
+\qquad
+\frac{
+  \Delta \vdash \Gamma
+}{
+  \Delta \vdash \{\Gamma\}
+}
+\qquad
+\frac{
+  \alpha \in \dom(\Delta)
+}{
+  \Delta \vdash \alpha
+}
+$$
+
+
+\subsection*{Type Normalisation}
+
+\subsubsection*{\fbox{$\Delta \vdash \Sigma \downarrow \Sigma'$}}
+
+$$
+\frac{
+}{
+  \Delta \vdash \y{V} \downarrow \y{V}
+}
+\qquad
+\frac{
+}{
+  \Delta \vdash \{\Gamma\} \downarrow \{\Gamma\}
+}
+\qquad
+\frac{
+  \Delta \vdash \Delta(\alpha) \downarrow \Sigma
+}{
+  \Delta \vdash \alpha \downarrow \Sigma
+}
+$$
+
+\note{
+Note: Gives the weak-head normal form of signatures wrt $\delta$-reduction over $\Delta$.
+\clearpage
+}
+
+
+%\clearpage
+\section{Typing Rules}
+
+%\subsubsection*{\fbox{$\Delta; \Gamma \vdash e$}}
+%
+%$$
+%\frac{
+%%  \Delta \vdash \Gamma(x) \downarrow \y{V}
+%}{
+%  \Delta; \Gamma \vdash x
+%}
+%\qquad
+%\frac{
+%  \Delta; \Gamma \vdash m : \Sigma
+%  \qquad
+%  \Delta \vdash \Sigma \downarrow \{\Gamma'\}
+%  \qquad
+%  \Delta \vdash \Gamma'(x) \downarrow \y{V}
+%}{
+%  \Delta; \Gamma \vdash m\K.x
+%}
+%$$
+%
+%\note{
+%Note: These rules assume we want to statically check non-module variables.
+%}
+
+
+\subsubsection*{\fbox{$\Delta; \Gamma \vdash m : \Sigma$}}
+
+$$
+\frac{
+  \Delta \vdash \Gamma(x) \downarrow \{\Gamma'\}
+}{
+  \Delta; \Gamma \vdash x : \Gamma(x)
+}
+\qquad
+\frac{
+  \Delta; \Gamma \vdash m : \Sigma
+  \qquad
+  \Delta \vdash \Sigma \downarrow \{\Gamma'\}
+  \qquad
+  \Delta \vdash \Gamma'(x) \downarrow \{\Gamma''\}
+}{
+  \Delta; \Gamma \vdash m\K.x : \Gamma'(x)
+}
+$$
+
+$$
+\frac{
+  \Delta^{\UU/\LL},\Delta_1^\DD; \Gamma,\Gamma_1 \vdash d : \Gamma_1
+  \qquad
+  \vdash \Delta,\Delta_1
+  \qquad
+  \Delta,\Delta_1 \vdash \Gamma,\Gamma_1
+}{
+  \Delta; \Gamma \vdash \{d\} : \{\Gamma_1|_{\ff{exports}(d)}\}
+}
+\quad
+\frac{
+  \Delta \vdash \Gamma'
+}{
+  \Delta; \Gamma \vdash \K{from}~u : \{\Gamma'\}
+}
+$$
+
+\note{
+Notes (on the rule for module literals):\\[-1.5\baselineskip]
+\begin{itemize}
+\item Modules are recursive, $\Gamma_1$ captures the local definitions.
+\item The meta-function $\ff{exports}(d)$ gives the set of \KK{export}-ed identifiers in $d$, and restricts the domain of $\Gamma_1$ to that set.
+(For simplicity, omitted a check for $\ff{exports}(d) \subseteq \dom(\Gamma_1)$.) The rule also allows to re-export imports.
+\item $\Delta_1$ captures local types from $\Gamma_1$ that do not escape into $\Gamma_1|_{\ff{exports}(d)}$.
+\item Because we descent into a nested module, all $\LL$-types in $\Delta$ turn to $\UU$. The types in $\Delta_1$ otoh.\ are all local, and thus $\DD$.
+\end{itemize}
+}
+
+
+\subsubsection*{\fbox{$\Delta; \Gamma \vdash d : \Gamma'$}}
+
+$$
+\frac{
+  \Delta; \Gamma \vdash e
+}{
+  \Delta; \Gamma \vdash \K{let}~x\K=e : x{:}\y{V}
+}
+\qquad
+\frac{
+  \Delta,\alpha{=}\Sigma^\LL; \Gamma \vdash m : \Sigma
+}{
+  \Delta,\alpha{=}\Sigma^\DD; \Gamma \vdash \K{module}~x\K=m : x{:}\alpha
+}
+$$
+
+$$
+\frac{
+}{
+  \Delta; \Gamma \vdash \K{export}~x : {\cdot}
+}
+$$
+
+$$
+\frac{
+  \Delta,\alpha{=}\Sigma^\LL; \Gamma \vdash m : \Sigma'
+  \qquad
+  \Delta,\alpha{=}\Sigma^\LL \vdash \Sigma' \downarrow \{\Gamma'\}
+  \qquad
+  \Gamma'(x) = \Sigma
+}{
+  \Delta,\alpha{=}\Sigma^\DD; \Gamma \vdash \K{import}~m\K.x : x{:}\alpha
+}
+$$
+
+$$
+\frac{
+  \Delta, \Delta_1^\LL; \Gamma \vdash m : \Sigma
+  \qquad
+  \Delta|_\UU \vdash \Sigma \downarrow \{\Delta_1\circ\Gamma'\}
+  \qquad
+  \Gamma' ~\mbox{bijection}
+}{
+  \Delta, \Delta_1^\DD; \Gamma \vdash \K{import}~m\K.{\star} : \Gamma'
+}
+$$
+
+$$
+\frac{
+}{
+  \Delta; \Gamma \vdash \epsilon : {\cdot}
+}
+\qquad
+\frac{
+  \Delta,\Delta_1^\DD,\Delta_2^\RR; \Gamma \vdash d_1 : \Gamma_1
+  \qquad
+  \Delta,\Delta_1^\LL,\Delta_2^\DD; \Gamma \vdash d_2 : \Gamma_2
+}{
+  \Delta,\Delta_1^\DD,\Delta_2^\DD; \Gamma \vdash d_1\K;d_2 : \Gamma_1,\Gamma_1
+}
+$$
+
+\note{
+Notes:\\[-1.5\baselineskip]
+\begin{itemize}
+\item All module identifiers are given a fresh type variable as their immediate type. This way, (1) type variables uniquely identify module bindings, and (2) a module $X$ aliases $Y$ iff $\Gamma(Y) \in \Delta^+(\Gamma(X))$. The actual $\Sigma$ is assumed to be (non-deterministically) bound to that variable in $\Delta$ already.
+\item For ``\K{import} $m\K.{\star}$'' we require that its signature can be normalized by referring only to ``upper'' types -- i.e., modules previously defined.
+No other restrictions on either imports or exports exist.
+\item A module declaration is considered left of anything on its rhs. This allows $\star$-importing a parent in a nested module, e.g.:
+\begin{code}
+\K{module} A = \{
+  \dots\K;
+  \K{module} B = \{ \K{import} A\K.${\star}$ \}\K;
+  \dots
+\}
+\end{code}
+\item Both forms of \K{import} can import both values and modules.
+\end{itemize}
+}
+
+
+\clearpage
+\section{Algorithmic Type-Checking}
+
+\subsection*{Types and Environments}
+$$
+\begin{array}{lrcl}
+\mbox{Signatures} & \sigma &::=& \y{V} ~|~ \{\gamma\} ~|~ \alpha \\
+\mbox{Rows} & \gamma &::=& {\cdot} ~|~ \gamma,x{:}\sigma ~|~ \rho \\
+\mbox{Type Environments} & \delta &::=& {\cdot} ~|~ \delta,\alpha{=}\sigma^? ~|~ \delta,\rho{=}\gamma^? \\
+\end{array}
+$$
+
+\note{
+Notes:
+~\\[-1.5\baselineskip]
+\begin{itemize}
+\item $\rho$ represents row variables \`a la R\'emy's polymorphic record types. Definite rows are identified up to reordering.
+\item $\delta$ stores unification variables; $x^?$ is either $x$ or $\_$ (unbound).
+\end{itemize}
+}
+
+
+\subsection*{Auxiliary Definitions}
+
+$$
+\begin{array}{rcll}
+\gamma,\cdot &=& \gamma \\
+\gamma,(\gamma',\alpha{=}\sigma^?) &=& (\gamma,\gamma'),\alpha{=}\sigma^? \\
+\end{array}
+$$
+
+\note{
+%\begin{center}
+Note: the concatenation $\gamma,\rho$ is not defined.
+%\end{center}
+}
+
+%$\delta^+$ is defined as smallest fixpoint of the following equations:
+%$$
+%\begin{array}{rcll}
+%\delta^+(\alpha) &=& \{\alpha'\} \cup \delta^+(\alpha') &\mbox{if $\delta(\alpha) = \alpha'$} \\
+%\delta^+(\alpha) &=& \{\} &\mbox{otherwise} \\
+%%\delta^+(\rho) &=& \{\rho'\} \cup \delta^+(\rho') &\mbox{if $\delta(\rho) = \rho'$} \\
+%%\delta^+(\rho) &=& \{\} &\mbox{otherwise} \\
+%\end{array}
+%$$
+
+
+\subsection*{Unification}
+
+\newcommand\makeeq{\stackrel!=}
+
+\subsubsection*{\fbox{$\delta \vdash \sigma_1 \makeeq \sigma_2 \dashv \delta'$}}
+\vspace{-2\baselineskip}
+
+$$
+\frac{
+}{
+  \delta \vdash \sigma \makeeq \sigma \dashv \delta
+}
+\qquad
+\frac{
+  \delta \vdash \sigma_2 \makeeq \sigma_1 \dashv \delta'
+}{
+  \delta \vdash \sigma_1 \makeeq \sigma_2 \dashv \delta'
+}
+$$
+
+$$
+\frac{
+  \delta \vdash \delta(\alpha) \makeeq \sigma \dashv \delta'
+}{
+  \delta \vdash \alpha \makeeq \sigma \dashv \delta'
+}
+\qquad
+\frac{
+  \alpha \neq \alpha'
+  \qquad
+%  \alpha \notin \delta^+(\alpha')
+  \delta(\alpha') = \_
+}{
+  \delta,\alpha{=}\_ \vdash \alpha \makeeq \alpha' \dashv \delta,\alpha{=}\alpha'
+}
+\qquad
+\frac{
+  \sigma ~\mbox{not a variable}
+}{
+  \delta,\alpha{=}\_ \vdash \alpha \makeeq \sigma \dashv \delta,\alpha{=}\sigma
+}
+$$
+
+$$
+\frac{
+  \delta \vdash \gamma_1 \makeeq \gamma_2 \dashv \delta'
+}{
+  \delta \vdash \{\gamma_1\} \makeeq \{\gamma_2\} \dashv \delta'
+}
+$$
+
+
+\subsubsection*{\fbox{$\delta \vdash \gamma_1 \makeeq \gamma_2 \dashv \delta'$}}
+\vspace{-2\baselineskip}
+
+$$
+\frac{
+}{
+  \delta \vdash \gamma \makeeq \gamma \dashv \delta
+}
+\qquad
+\frac{
+  \delta \vdash \gamma_2 \makeeq \gamma_1 \dashv \delta'
+}{
+  \delta \vdash \gamma_1 \makeeq \gamma_2 \dashv \delta'
+}
+$$
+
+$$
+\frac{
+  \delta \vdash \delta(\rho) \makeeq \gamma \dashv \delta'
+}{
+  \delta \vdash \rho \makeeq \gamma \dashv \delta'
+}
+\qquad
+\frac{
+  \rho \neq \rho'
+  \qquad
+%  \rho \notin \delta^+(\rho')
+  \delta(\rho') = \_
+}{
+  \delta,\rho{=}\_ \vdash \rho \makeeq \rho' \dashv \delta,\rho{=}\rho'
+}
+\qquad
+\frac{
+  \gamma ~\mbox{not a variable}
+}{
+  \delta,\rho{=}\_ \vdash \rho \makeeq \gamma \dashv \delta,\rho{=}\gamma
+}
+$$
+
+%$$
+%\frac{
+%  \begin{array}{@{}l@{\qquad}c@{\qquad}c@{}}
+%  \delta \vdash \gamma_1 \downarrow \gamma'_1,\vec{x{:}\sigma_1\strut},\vec{x'_1{:}\sigma'_1\strut}
+%  &
+%%  \gamma'_1 = \rho'_1 \vee \gamma'_1 = \cdot
+%%  \qquad
+%%  \gamma'_2 = \rho'_1 \vee \gamma'_2 = \cdot
+%  &
+%  \delta' \vdash \gamma'_1 \makeeq \rho,\vec{x'_2{:}\sigma'_2} \dashv \delta''
+%  \\
+%  \delta \vdash \gamma_2 \downarrow \gamma'_2,\vec{x{:}\sigma_2\strut},\vec{x'_2{:}\sigma'_2\strut}
+%  &
+%  \delta,\rho{=}\_ \vdash \vec\sigma_1 \makeeq \vec\sigma_2 \dashv \delta'
+%  &
+%  \delta'' \vdash \gamma'_2 \makeeq \rho,\vec{x'_1{:}\sigma'_1} \dashv \delta'''
+%  \end{array}
+%}{
+%  \delta \vdash \gamma_1 \makeeq \gamma_2 \dashv \delta'''
+%}
+%$$
+
+$$
+\frac{
+  \delta \vdash \sigma_1 \makeeq \sigma_2 \dashv \delta'
+  \qquad
+  \delta' \vdash \gamma_1 \makeeq \gamma_1 \dashv \delta''
+}{
+  \delta \vdash \gamma_1,x{:}\sigma_1 \makeeq \gamma_2,x{:}\sigma_2 \dashv \delta''
+}
+$$
+
+$$
+\frac{
+  x_1 \neq x_2
+  \qquad
+  \delta,\rho{=}\_ \vdash \gamma_1 \makeeq \rho,x_2{:}\sigma_2 \dashv \delta'
+  \qquad
+  \delta' \vdash \gamma_2 \makeeq \rho,x_1{:}\sigma_1 \dashv \delta''
+}{
+  \delta \vdash \gamma_1,x_1{:}\sigma_1 \makeeq \gamma_2,x_2{:}\sigma_2 \dashv \delta''
+}
+$$
+
+\subsection*{Row Normalisation}
+
+\subsubsection*{\fbox{$\delta \vdash \gamma \downarrow \gamma'$}}
+
+$$
+\frac{
+}{
+  \delta \vdash {\cdot} \downarrow {\cdot}
+}
+\qquad
+\frac{
+  \delta \vdash \gamma \downarrow \gamma'
+}{
+  \delta \vdash \gamma,x{:}\sigma \downarrow \gamma',x{:}\sigma
+}
+\qquad
+\frac{
+  \delta \vdash \delta(\rho) \downarrow \gamma
+}{
+  \delta \vdash \rho \downarrow \gamma
+}
+\qquad
+\frac{
+  \delta(\rho) = \_
+}{
+  \delta \vdash \rho \downarrow \rho
+}
+$$
+
+
+\clearpage
+\subsection*{Algorithmic Rules}
+
+\newcommand\anal{\Leftarrow}
+\newcommand\synth{\Rightarrow}
+
+\subsubsection*{\fbox{$\delta; \gamma \vdash m$}}
+
+$$
+\frac{
+  \delta,\rho{=}\_; \gamma \vdash m \anal \{\rho\} \dashv \delta'
+  \qquad
+  \_ \notin \ran(\delta')
+}{
+  \delta; \gamma \vdash m
+}
+$$
+
+\note{
+Notes:
+\begin{itemize}
+\item A complete program may not produce any unbound unification variables. They would correspond to a cyclic definition, e.g.\ \K{module X = X}.
+\item We assume the initial $\delta$ and $\gamma$ are well-formed. In particular, $\delta$ contains no direct cycles, and $\gamma$ contains no row variable.
+\end{itemize}
+}
+
+
+%\subsubsection*{\fbox{$\delta; \gamma \vdash e \dashv \delta'$}}
+%
+%$$
+%\frac{
+%  \delta \vdash \gamma(x) \makeeq \y{V} \dashv \delta'
+%}{
+%  \delta; \gamma \vdash x \dashv \delta'
+%}
+%\qquad
+%\frac{
+%  \delta,\rho{=}\_; \gamma \vdash m \anal \{\rho,x{:}\y{V}\} \dashv \delta'
+%}{
+%  \delta; \gamma \vdash m\K.x \dashv \delta'
+%}
+%$$
+
+
+\subsubsection*{\fbox{$\delta; \gamma \vdash m \anal \sigma \dashv \delta'$}}
+
+$$
+\frac{
+  \delta \vdash \sigma \makeeq \gamma(x) \dashv \delta'
+  \qquad
+  \delta',\rho{=}\_ \vdash \gamma(x) \makeeq \{\rho\} \dashv \delta''
+}{
+  \delta; \gamma \vdash x \anal \sigma \dashv \delta''
+}
+$$
+
+$$
+\frac{
+  \delta,\rho{=}\_; \gamma \vdash m \anal \{\rho,x{:}\sigma\} \dashv \delta'
+}{
+  \delta; \gamma \vdash m\K.x \anal \sigma \dashv \delta'
+}
+$$
+
+$$
+\frac{
+  \delta; \gamma \vdash d \synth \gamma' \dashv \delta'
+  \qquad
+  \delta' \vdash \sigma \makeeq \{\gamma'|_{\ff{exports}(d)}\} \dashv \delta''
+  \qquad
+  \delta''; \gamma,\gamma' \vdash d \dashv \delta'''
+}{
+  \delta; \gamma \vdash \{d\} \anal \sigma \dashv \delta'''
+}
+%\qquad
+%\frac{
+%}{
+%  \delta; \gamma \vdash \K{from}~u \anal \{\gamma'\} \dashv \delta
+%}
+$$
+
+\note{
+Notes:
+\begin{itemize}
+\item Typing modules happens in analysis mode: $\sigma$ is an input to unify with.
+\item To type a module literal, we first compute a preliminary $\gamma'$ (assigning fresh type variables, except with $\star$-imports, see below), and then descent into type-checking $d$ properly. By unifying with $\sigma$ before the recursion, we enable using it for $\star$-imports inside $d$ (corresponds to switching $\DD$ to $\LL$ in the declarative rule).
+\end{itemize}
+\clearpage
+}
+
+
+\subsubsection*{\fbox{$\delta; \gamma \vdash d \synth \gamma \dashv \delta'$}}
+
+$$
+\frac{
+}{
+  \delta; \gamma \vdash \K{let}~x\K=e \synth x{:}\y{V} \dashv \delta
+}
+\qquad
+\frac{
+}{
+  \delta; \gamma \vdash \K{module}~x\K=m \synth x{:}\alpha \dashv \delta,\alpha{=}\_
+}
+$$
+
+$$
+\frac{
+}{
+  \delta; \gamma \vdash \K{export}~x \synth {\cdot} \dashv \delta
+}
+\qquad
+\frac{
+}{
+  \delta; \gamma \vdash \K{import}~m\K.x \synth x{:}\alpha \dashv \delta,\alpha{=}\_
+}
+$$
+
+$$
+\frac{
+  \delta,\rho{=}\_; \gamma \vdash m \anal \{\rho\} \dashv \delta'
+  \qquad
+  \delta' \vdash \rho \downarrow {\cdot},\gamma'
+}{
+  \delta; \gamma \vdash \K{import}~m\K.{\star} \synth \gamma' \dashv \delta'
+}
+$$
+
+$$
+\frac{
+}{
+  \delta; \gamma \vdash \epsilon \synth {\cdot} \dashv \delta
+}
+\qquad
+\frac{
+  \delta; \gamma \vdash d_1 \synth \gamma_1 \dashv \delta'
+  \qquad
+  \delta'; \gamma \vdash d_2 \synth \gamma_2 \dashv \delta''
+}{
+  \delta; \gamma \vdash d_1\K;d_2 \synth \gamma_1,\gamma_1 \dashv \delta''
+}
+$$
+
+\note{
+Notes:
+\begin{itemize}
+\item This judgement precomputes a fresh $\gamma$ for a module body. It assigns fresh type variables to anything that could be a module.
+\item However, for $\star$-imports we require that the domain of the signature of the referenced module is already fully determined at this stage (its row normalizes to $\cdot,\rho'$, which implies that $\rho'$ does not contain a row variable).
+\end{itemize}
+}
+
+
+\subsubsection*{\fbox{$\delta; \gamma \vdash d \dashv \delta'$}}
+
+$$
+\frac{
+  \delta; \gamma \vdash e \dashv \delta'
+}{
+  \delta; \gamma \vdash \K{let}~x\K=e \dashv \delta'
+}
+\qquad
+\frac{
+  \delta; \gamma \vdash m \anal \gamma(x) \dashv \delta'
+}{
+  \delta; \gamma \vdash \K{module}~x\K=m \dashv \delta'
+}
+$$
+
+$$
+\frac{
+}{
+  \delta; \gamma \vdash \K{export}~x \dashv \delta
+}
+\qquad
+$$
+
+$$
+\qquad
+\frac{
+  \delta,\rho{=}\_; \gamma \vdash m \anal \{\rho,x{:}\gamma(x)\} \dashv \delta'
+}{
+  \delta; \gamma \vdash \K{import}~m\K.x \dashv \delta'
+}
+\qquad
+\frac{
+}{
+  \delta; \gamma \vdash \K{import}~m\K.{\star} \dashv \delta
+}
+$$
+
+$$
+\frac{
+}{
+  \delta; \gamma \vdash \epsilon \dashv \delta
+}
+\qquad
+\frac{
+  \delta; \gamma \vdash d_1 \dashv \delta'
+  \qquad
+  \delta'; \gamma \vdash d_2 \dashv \delta''
+}{
+  \delta; \gamma \vdash d_1\K;d_2 \dashv \delta''
+}
+$$
+
+\note{
+Notes:
+\begin{itemize}
+\item This judgement merely checks the right-hand sides and unifies the pre-assigned type variables accordingly.
+\item For $\star$-imports, there is nothing left to do at this stage.
+\end{itemize}
+}
+
+
+\note{
+\subsubsection*{Other Notes:}
+\begin{itemize}
+\item The types inferred by the algorithm and the ones derived by the declarative rules are equivalent only up to normalization, because unification does not give enough control over the binding order of variables (and also performs path compression).
+\item Hence, the previously mentioned aliasing condition ``$X$ aliases $Y$ iff $\Gamma(Y) \in \Delta^+(\Gamma(X))$'' does not hold for the algorithmic types. Aliasing has to be tracked by additional means, e.g.\ by giving identity to module signatures. The prototype uses straightforward physical equality on signature values, along with their physical unification.
+\end{itemize}
+}
+
+
+
+\end{document}
+
+
+\clearpage
+\section{Typing without Upward Import}
+
+\subsubsection*{\fbox{$\Delta; \Gamma \vdash e$}}
+
+$$
+\frac{
+  \Gamma(x) = \y{V}
+}{
+  \Delta; \Gamma \vdash x
+}
+\qquad
+\frac{
+  \Delta; \Gamma \vdash m : \Sigma
+  \qquad
+  \Delta \vdash \Sigma \downarrow \{\Gamma'\}
+  \qquad
+  \Gamma'(x) = \y{V}
+}{
+  \Delta; \Gamma \vdash m\K.x
+}
+$$
+
+
+\subsubsection*{\fbox{$\Delta; \Gamma \vdash m : \Sigma$}}
+
+$$
+\frac{
+  \Gamma(x) \neq \y{V}
+}{
+  \Delta; \Gamma \vdash x : \Gamma(x)
+}
+\qquad
+\frac{
+  \Delta; \Gamma \vdash m : \Sigma
+  \qquad
+  \Delta \vdash \Sigma \downarrow \{\Gamma'\}
+  \qquad
+  \Gamma'(x) \neq \y{V}
+}{
+  \Delta; \Gamma \vdash m\K.x : \Gamma'(x)
+}
+$$
+
+$$
+\frac{
+  \Delta^{\UU/\LL},\Delta_1^\DD; \Gamma,\Gamma_1 \vdash d : \Gamma_1
+  \qquad
+  \vdash \Delta,\Delta_1^\DD
+  \qquad
+  \Delta,\Delta_1^\DD \vdash \Gamma,\Gamma_1
+}{
+  \Delta; \Gamma \vdash \{d\} : \{\Gamma_1|_{\ff{exports}(d)}\}
+}
+\quad
+\frac{
+  \Delta \vdash \Gamma'
+}{
+  \Delta; \Gamma \vdash \K{from}~u : \{\Gamma'\}
+}
+$$
+
+
+\subsubsection*{\fbox{$\Delta; \Gamma \vdash d : \Gamma'$}}
+
+$$
+\frac{
+  \Delta; \Gamma \vdash e
+}{
+  \Delta; \Gamma \vdash \K{let}~x\K=e : x{:}\y{V}
+}
+\qquad
+\frac{
+  \Delta,\alpha{=}\Sigma^\RR; \Gamma \vdash m : \Sigma
+}{
+  \Delta,\alpha{=}\Sigma^\DD; \Gamma \vdash \K{module}~x\K=m : x{:}\alpha
+}
+$$
+
+$$
+\frac{
+}{
+  \Delta; \Gamma \vdash \K{export}~x : {\cdot}
+}
+$$
+
+$$
+\frac{
+  \Delta,\alpha{=}\Sigma^\RR; \Gamma \vdash m : \Sigma
+  \qquad
+  \Delta,\alpha{=}\Sigma^\RR \vdash \Sigma \downarrow \{\Gamma'\}
+  \qquad
+  \Gamma'(x) = \Sigma
+}{
+  \Delta,\alpha{=}\Sigma^\DD; \Gamma \vdash \K{import}~m\K.x : x{:}\alpha
+}
+$$
+
+$$
+\frac{
+  \Delta, \Delta_1^\RR; \Gamma \vdash m : \Sigma
+  \qquad
+  \Delta|_\UU \vdash \Sigma \downarrow \{\Delta_1\circ\Gamma'\}
+}{
+  \Delta, \Delta_1^\DD; \Gamma \vdash \K{import}~m\K.{\star} : \Gamma'
+}
+$$
+
+$$
+\frac{
+}{
+  \Delta; \Gamma \vdash \epsilon : {\cdot}
+}
+\qquad
+\frac{
+  \Delta,\Delta_1^\DD,\Delta_2^\RR; \Gamma \vdash d_1 : \Gamma_1
+  \qquad
+  \Delta,\Delta_1^\LL,\Delta_2^\DD; \Gamma \vdash d_2 : \Gamma_2
+}{
+  \Delta,\Delta_1^\DD,\Delta_2^\DD; \Gamma \vdash d_1\K;d_2 : \Gamma_1,\Gamma_1
+}
+$$
+
+
+\clearpage
+\subsection*{Algorithmic Rules}
+
+\subsubsection*{\fbox{$\delta; \gamma \vdash e \dashv \delta'$}}
+
+$$
+\frac{
+  \delta \vdash \gamma(x) \makeeq \y{V} \dashv \delta'
+}{
+  \delta; \gamma \vdash x \dashv \delta'
+}
+\qquad
+\frac{
+  \delta; \gamma \vdash m : \sigma \dashv \delta'
+  \qquad
+  \delta',\rho{=}\_ \vdash \sigma \makeeq \{\rho,x{:}\y{V}\} \dashv \delta''
+}{
+  \delta; \gamma \vdash m\K.x \dashv \delta''
+}
+$$
+
+
+\subsubsection*{\fbox{$\delta; \gamma \vdash m \hilite: \sigma \dashv \delta'$}}
+
+$$
+\frac{
+  \delta,\rho{=}\_ \vdash \gamma(x) \makeeq \{\rho\} \dashv \delta'
+}{
+  \delta; \gamma \vdash x : \{\rho\} \dashv \delta'
+}
+$$
+
+$$
+\frac{
+  \delta; \gamma \vdash m : \sigma \dashv \delta'
+  \qquad
+  \delta',\rho{=}\_,\rho'{=}\_ \vdash \sigma \makeeq \{\rho',x{:}\{\rho\}\} \dashv \delta''
+}{
+  \delta; \gamma \vdash m\K.x : \{\rho\} \dashv \delta''
+}
+$$
+
+$$
+\frac{
+  \delta; \gamma \vdash d \div \gamma' \dashv \delta'
+  \qquad
+  \delta'; \gamma,\gamma' \vdash d \dashv \delta''
+%  \qquad
+%  \hilite{\mbox{no cycle?}}
+%  \vdash \delta''
+%  \_ \notin \ran(\delta'' \circ \gamma')
+}{
+  \delta; \gamma \vdash \{d\} : \{\gamma'|_{\ff{exports}(d)}\} \dashv \delta''
+}
+%\qquad
+%\frac{
+%  \Delta \vdash \Gamma'
+%}{
+%  \delta; \gamma \vdash \K{from}~u : \gamma'
+%}
+$$
+
+
+\subsubsection*{\fbox{$\delta; \gamma \vdash d \div \gamma \dashv \delta'$}}
+
+$$
+\frac{
+}{
+  \delta; \gamma \vdash \K{let}~x\K=e \div x{:}\y{V} \dashv \delta
+}
+\qquad
+\frac{
+}{
+  \delta; \gamma \vdash \K{module}~x\K=m \div x{:}\alpha \dashv \delta,\alpha{=}\_
+}
+$$
+
+$$
+\frac{
+}{
+  \delta; \gamma \vdash \K{export}~x \div {\cdot} \dashv \delta
+}
+\qquad
+\frac{
+}{
+  \delta; \gamma \vdash \K{import}~m\K.x \div x{:}\alpha \dashv \delta,\alpha{=}\_
+}
+$$
+
+$$
+\frac{
+  \delta; \gamma \vdash m : \sigma \dashv \delta'
+  \qquad
+  \delta',\rho{=}\_ \vdash \sigma \makeeq \{\rho\} \dashv \delta''
+  \qquad
+  \delta'' \vdash \rho \downarrow {\cdot},\gamma'
+}{
+  \delta; \gamma \vdash \K{import}~m\K.{\star} : \gamma' \dashv \delta''
+}
+$$
+
+$$
+\frac{
+}{
+  \delta; \gamma \vdash \epsilon \div {\cdot} \dashv \delta
+}
+\qquad
+\frac{
+  \delta; \gamma \vdash d_1 \div \gamma_1 \dashv \delta'
+  \qquad
+  \delta'; \gamma \vdash d_2 \div \gamma_2 \dashv \delta''
+}{
+  \delta; \gamma \vdash d_1\K;d_2 \div \gamma_1,\gamma_1 \dashv \delta''
+}
+$$
+
+
+\subsubsection*{\fbox{$\delta; \gamma \vdash d \dashv \delta'$}}
+
+$$
+\frac{
+  \delta; \gamma \vdash e \dashv \delta'
+}{
+  \delta; \gamma \vdash \K{let}~x\K=e \dashv \delta'
+}
+\qquad
+\frac{
+  \delta; \gamma \vdash m : \sigma \dashv \delta'
+%  \qquad
+%  \sigma \notin {\delta'}^+(\gamma(x))
+  \qquad
+  \delta' \vdash \sigma \makeeq \gamma(x) \dashv \delta''
+}{
+  \delta; \gamma \vdash \K{module}~x\K=m \dashv \delta''
+}
+$$
+
+$$
+\frac{
+}{
+  \delta; \gamma \vdash \K{export}~x \dashv \delta
+}
+\qquad
+$$
+
+$$
+\frac{
+  \delta; \gamma \vdash m : \sigma \dashv \delta'
+  \qquad
+  \delta',\rho{=}\_ \vdash \sigma \makeeq \{\rho,x{:}\gamma(x)\} \dashv \delta''
+}{
+  \delta; \gamma \vdash \K{import}~m\K.x \dashv \delta''
+}
+\qquad
+\frac{
+}{
+  \delta; \gamma \vdash \K{import}~m\K.{\star} \dashv \delta
+}
+$$
+
+$$
+\frac{
+}{
+  \delta; \gamma \vdash \epsilon \dashv \delta
+}
+\qquad
+\frac{
+  \delta; \gamma \vdash d_1 \dashv \delta'
+  \qquad
+  \delta'; \gamma \vdash d_2 \dashv \delta''
+}{
+  \delta; \gamma \vdash d_1\K;d_2 \dashv \delta''
+}
+$$
+
+
+\subsubsection*{\fbox{$\delta; \gamma \vdash m$}}
+
+$$
+\frac{
+  \delta; \gamma \vdash m : \sigma \dashv \delta'
+  \qquad
+  \_ \notin \ran(\delta')
+}{
+  \delta; \gamma \vdash m
+}
+$$
+
+
+\end{document}

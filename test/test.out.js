@@ -1,0 +1,3 @@
+type = {E, x: V, B: 13 as 12 as {11 as 10 as E, BB: 6 as {9 as 8 as 7 as E, BB: 6..., x: V}, x: V}, A: 21 as {20 as 19 as 18 as 17 as 16 as E, f: V, y: V, x: V, B: 14 as 13 as 12 as {11 as 10 as E, BB: 6 as {9 as 8 as 7 as E, BB: 6..., x: V}, x: V}}, E: 15 as {E, xx: V, y: V, B: 14 as 13 as 12 as {11 as 10 as E, BB: 6 as {9 as 8 as 7 as E, BB: 6..., x: V}, x: V}}, M1: 5 as {E, A2: 3 as {2 as E, A1: 1 as {E, A2: 3...}}}, M2: 4 as {2 as E, A1: 1 as {E, A2: 3 as {2 as E, A1: 1...}}}}
+name = 22
+menv = 22 -> _, 21 -> _.A, 23 -> _.A.B, 24 -> _.A.C, 25 -> _.A.D, 26 -> _.A.M, 15 -> _.E, 5 -> _.M1, 4 -> _.M2
